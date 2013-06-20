@@ -8,9 +8,9 @@ setup(
     packages = find_packages(),
     scripts = [],
 
-    install_requires = [],
+    install_requires = ['sphinxcontrib-plantuml'],
 
-    build_requires = ['docutils', 'sphinxcontrib-plantuml'],
+    setup_requires = ['docutils', 'sphinxcontrib-plantuml'],
 
     package_data = {
     },
