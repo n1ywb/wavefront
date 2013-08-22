@@ -4,6 +4,9 @@ Design Documentation
 Definitions
 -----------
 
+binsize
+    The number of samples per bin.
+
 Window
     The time period of interest as specified by the client. Tstart and Tend may
     be specified in or absolute terms, or relative to Tnow.
@@ -50,7 +53,9 @@ The program shall provide the following features:
 #. Make waveform data available to web clients on demand.
 #. Abstract data sources; clients see a single unified data set.
 #. Data sources include Antelope Orbs and Datascope databases.
+#. Ability to filter data prior to ingestion based on configurable criteria.
 #. Clients may query previously received WF data.
+#. Clients may request raw data or data reduced via max/min/median binning.
 #. Asyncronous clients may request continuous real time streaming data.
 #. It should be possible to query data which was previously received from an orb
    but which is not yet available in Datascope.
@@ -81,6 +86,201 @@ them to disk. However there are several caveats:
 
 The system must accomodate this behaviour.
 
+The system shall make binned data available. Bin sizes shall increase by powers
+of 2 (I.e. 2, 4, 8, 16, etc) up to a configurable maximum.
+
+This will create a high continuous load in exchange for a high per-request
+load. Some fine tuning of bin size steps may find an optimal compromise here.
+Maybe fixing it at powers of two isn't such a good idea. A configurable divisor
+might make more sense; e.g. 2, 3, 10 maybe. It would take some benchmarking to
+determine the ideal value to balance continuous load vs request load.
+
+The system shall return fixed size chunks of data samples/bins. The chunk size
+shall be configurable. The size selection should be small enough such that
+clients displaying small windows do not receive much more data than they need,
+and large enough such that clients displaying large windows do not need to
+request an unnecessarily large number of chunks.
+
+Fixing the bin and chunk sizes to a few preconfigured values reduces client
+flexability. However it's necessary for server performance and scalability. The
+server will use fixed size bins and chunks internally; it's the only way to
+make caching work efficiently. Clients may have to do a little bit more work if
+they wish to display data in odd chunk sizes or bin sizes, but this seems like
+a reasonable compromise between server load and client load. Even an iPhone
+should have enough capacity to request one bin size smaller than it wants to
+display and then further reduce.
+
+Data streaming off the orb can only be reduced so far. The maximum reduction
+that can be performed on a single packet without looking at data from other
+packets is 1 sample per packet. This may still be fairly high resolution for
+some data streams. But further real time reduction seems impractical. It would
+require access to both past and future data. This could probably be retrieved
+from memcache and or datascope but that would add a huge IO load to the server.
+Or the server could keep some data in memory but then you have issues at app
+initialization and somewhat defeat the purpose of using memcache. 
+
+A reasonable compromise may be to perform further reduction on-the-fly in
+response to requests for such data.
+
+So wait a minute; are we going to have memcache buckets with ONE sample? That's
+NFG.
+
+There's no way around it; the system is going to have to keep in memory partial
+buckets, add data as packets arrive, and flush them to memcache when they are
+full.
+
+For higher reduction buckets, latency could become bad. Either the buckets need
+to be really small, or we need to support streaming partial buckets.
+
+For really slow rates it seems like a no brainer to stream binned samples to
+clients as they are generated. Whether or not the updated partial bucket should
+then be flushed to memcache is another story. If they're REALLY slow we could
+even drop them from server memory and read from memcache, update, and write
+back to memcache.
+
+There's really four levels of caching; 4 places to check to fufill queries:
+
+#. Streaming bin buffers; RT data streaming in and filling up multilevel binned
+buckets
+#. RT memcache; when a bucket gets full (or when Tnow goes off the end of the
+bucket IE b/c of data gaps) buckets are sent to RT memcache
+#. DS memcache; cache results of DS queries; if OOO data arrives, read and
+expire from DS memcache, update, write to RT memcache (note that data may
+expire from RT cache earlier than it would have otherwise expired from DS
+cache)
+#. DS; last resort
+
+OOO data presents an interesting issue. Ideally every streaming bin bucket
+would be full before flushing to memcache. In reality the first packet may not
+arrive on a bucket boundary. Subsequent packets may arrive out of order after
+significant delay (or not at all).
+
+To overcome this, partial buckets must be flushed to memcache periodically. If
+fill data arrives, these buckets must be read back in, from datascope if
+necessary, updated, and rewritten to RT memcache. They should also be expired
+from DS memcache to avoid the situtation where the fill data has been written
+to datascope but queries are fufilled with the cached partial bucket.
+
+Basically if packet 1 arrives followed by packet 3, packet 2's data must be
+marked as unknown in the appropriate buckets and the partial buckets which
+packet 2 would have completed must be flushed. 
+
+Major issue with using memcache for RT data. Memcache uses LRU algorithm.
+Queries for older data will keep it in the cache at the expense of newer data,
+which could be flushed. Because the newer data may not yet be written to
+datascope, it will simply disappear from the system. That is not acceptable. 
+
+Instead, for RT data, we will have to use a fixed size FIFO buffer for each
+pre-bin level for each instrument.
+
+If we support custom bin levels, then using memcache to cache the custom binned
+data might still make sense. When a bucket expires it can still be recreated by
+going back to the FIFOs.
+
+This does not affect using memcache for datascope.
+
+There are really two distinct use cases here.
+
+One is a web dlmon. That shows low resolution data from many instruments
+updating in real time. We want the page to load quickly so having the data for
+the default zoom level pre-binned makes lots of sense. Panning and zooming
+around within the range of the RT FIFO is fast b/c it's all in RAM, even if it
+has to be rebinned that's relatively cheap.
+
+The other is interactive waveform exploration. Users could look at any portion
+of any waveform at any zoom level. Prebinning the data at many levels could
+decrease latency but at the cost of greater server complexity and high
+continuous load. Going to datascope is expensive. Do we cache raw datascope
+results, binned data, or both? If we cache the raw datascope results it will be
+faster to recalculate different bins, but the raw data will always hog up
+most/all of the cache. In fact it's entirely possible the results of a single
+large query could overflow the cache. Then doing the same query we'd miss on
+the first chunk, the reload it, forcing out the next chunk, which would then
+miss and be reloaded, etc, basically causing cache thrash. That can be avoided
+somewhat by serving up all cached data before going to datascope. If we only
+cache binned data we have to go to datascope more often. We might need some
+sort of multilayered or priority cache; memcache may not be a good fit here. At
+least two layers, one for raw data, and one for binned data. A future
+enhancement could spool expiring binned chunks to disk instead of just zapping
+them.
+
+So the levels of data really are, in lookup order:
+
+1. FIFO's, raw and pre-binned
+2. Custom binned data cache
+4. Datascope query cache
+5. Datascope
+
+The query should supply enough information to determine if the FIFO's contain
+the data, and if so, which FIFO to use. If the FIFO's do not contain the data,
+then check the custom binned cache, then datascope cache, then query datascope.
+
+Do we permit streaming of custom binned RT data?
+
+Top priority: orbmontrd backend
+Neccessary functionality:
+
+1. Streaming
+2. Full res?
+3. Pre-binned
+
+No caching, no querying, no custom binning, no datascope.
+
+What about if data is not present in the RT system but partial data is present
+in datascope and the datascope query cache and then an update arrives? How do
+we know when to flush that query from the cache?
+
+Samples flow from orb packets into a raw ring buffer and then into reduced ring buffers
+
+max, min, med, starting T, ending T
+
+compare Tstart Tend to see if it's complete 
+
+be sure to support partials and updates
+
+use pub/sub pattern to chain buffers and pub updates to clients
+
+does chaning buffers make sense, or is that dumb? I think I'm going with dumb. They can all just listen to the RT buffer.
+
+Geoff sez Orb data is mostly in ram anyhow so really no reason to buffer RT
+data just get it w orbafter/orbreap. Course this goes over a socket. If the
+performance sucks consider buffering afterall.
+
+Wait. orb data comes over a SOCKET. And yeah it's in ram on the orb server,
+which isn't necessarily the machine hosting the web app, which means it has to
+come over the LAN.
+
+(04:56:10 PM) n1ywb: so then in the future when we support querying backdata, it might be helpful to use a small local memcache on the web server to reduce traffic to the orb server, although that only really helps if people are repeatedly looking at the same data, which might not happen much in practice
+(04:57:51 PM) n1ywb: once we have some users and some usage data it should be easy enough to calculate what the benefit would be and that will make it obvious if it's worth implementing or not
+
+(04:39:18 PM) n1ywb: wait a minute
+(04:39:37 PM) n1ywb: orb data is in ram, on the orb server, which isn't necessarily the machine which is going to run the web service, and so the data has to come over the lan, right?
+(04:40:54 PM) n1ywb: that's wicked slow
+(04:44:51 PM) n1ywb: i mean, it might be a fast lan, but it's still orders of magnitude slower than having it in local ram on the web server
+(04:45:13 PM) n1ywb: i guess memcached would have that issue too, except it could be run locally on the web server
+(04:47:41 PM) piratepork: Correct on all counts. Plus the data in memcached is already set up for consumption
+(04:48:07 PM) n1ywb: does orbmonrtd even let you see full res data right now?
+(04:48:15 PM) n1ywb: or is it always reduced?
+(04:48:31 PM) piratepork: Always reduced
+(04:48:57 PM) piratepork: It does a rolling pixmap
+(04:49:00 PM) n1ywb: k so maybe we don't need to push full res data over weborbmonrtd anyway, then it's a non issue, no need to keep any more full res data in ram then is necessary to fill the next bin
+(04:49:19 PM) piratepork: Can't resize traces dynamically
+(04:49:34 PM) n1ywb: hm?
+(04:49:52 PM) piratepork: Orbmonrtd can't
+(04:50:03 PM) n1ywb: ok
+(04:50:22 PM) piratepork: Sorry on phone on a bus so brevity is the rule for a bit
+(04:50:31 PM) n1ywb: np
+(04:56:10 PM) n1ywb: so then in the future when we support querying backdata, it might be helpful to use a small local memcache on the web server to reduce traffic to the orb server, although that only really helps if people are repeatedly looking at the same data, which might not happen much in practice
+(04:57:51 PM) n1ywb: once we have some users and some usage data it should be easy enough to calculate what the benefit would be and that will make it obvious if it's worth implementing or not
+
+It almost feels like streaming and querying are two seperate services. The only streamy thing about querying would be live backfills.
+
+Feature roadmap
+
+1. Stream pre-binned real time WF data, enough to facility weborbmonrtd
+2. Query data from orb
+3. Query data from datascope with simple caching
+4. Performance analysis and advanced caching
 
 Implementation
 --------------
@@ -98,10 +298,10 @@ Implementation
        will be eventually available from datascope in any event.
     #. Because memcache has no priorities, use seperate instances of memcached for Orb and DB caches.
 #. Client functions:
-    #. query(Tstart, Tend)
+    #. query(Tstart, Tend, binsize, accept, reject)
         #. return all immediately available waveform data for window
         #. optionally stream newly received data which was acquired in the window but delayed (this only makes sense for async clients)
-    #. monitor(Tstart, Tend, history=False)
+    #. monitor(Tstart, Tend, binsize, accept, reject, history=False)
         #. Stream live waveform data from the orb as it arrives (this only makes sense for async clients)
         #. Window from [Tstart:Tend]; packets with timestamps outside the window
            are not sent to client regardless of when they arrive.
