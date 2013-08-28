@@ -1,4 +1,70 @@
 class CircularBuffer(object):
+    """Fixed sized pre-initialized circular buffer.
+
+    :param size: Number of elements in buffer.
+    :item_factory: Called ``size`` times to initialize buffer.
+
+    If ``item_factory`` is not specified, each element is initialized to
+    ``None``.
+
+    Item 0 is the oldest element in the buffer. Item 1 is second oldest, and so
+    on. Item -1 is the newest element, -2 is the second newest, and so on.
+
+    Example:
+
+    >>> from circbuf import CircularBuffer
+    >>> cb = CircularBuffer(3)
+    >>> str(cb)
+    '[None, None, None]'
+    >>> repr(cb) # doctest: +ELLIPSIS
+    '<CircularBuffer ...: size=3, head=0>'
+    >>> len(cb)
+    3
+    >>> cb.append('wensleydale')
+    >>> str(cb)
+    "[None, None, 'wensleydale']"
+    >>> cb.extend(('chedder', 'limburger'))
+    >>> str(cb)
+    "['wensleydale', 'chedder', 'limburger']"
+    >>> 'chedder' in cb
+    True
+    >>> 'gorgonzola' in cb
+    False
+    >>> cb[0]
+    'wensleydale'
+    >>> cb[-1]
+    'limburger'
+    >>> cb[-2]
+    'chedder'
+    >>> cb[1]
+    'chedder'
+    >>> cb[9999997]
+    'chedder'
+    >>> cb[0:2]
+    ['wensleydale', 'chedder']
+    >>> cb[-2:0]
+    ['chedder', 'limburger']
+    >>> cb[::2]
+    ['wensleydale', 'limburger']
+    >>> i = iter(cb)
+    >>> i.next()
+    'wensleydale'
+    >>> i.next()
+    'chedder'
+    >>> i.next()
+    'limburger'
+    >>> i.next()
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+    StopIteration
+    >>> cb[0] = 'gouda'
+    >>> str(cb)
+    "['gouda', 'chedder', 'limburger']"
+    >>> cb[-2:0] = ('mozzarella', 'parmesan')
+    >>> str(cb)
+    "['gouda', 'mozzarella', 'parmesan']"
+    """
+
     def __init__(self, size, item_factory=lambda: None):
         self._size = size
         self._head = 0
@@ -7,14 +73,22 @@ class CircularBuffer(object):
     def __repr__(self):
         return "<CircularBuffer %s: size=%s, head=%s>" % (id(self), self._size, self._head)
 
+    def __str__(self):
+        return str(list(self))
+
     def _absidx(self, n):
         return (self._head + n) % self._size
 
     def append(self, item):
+        """Appends a new element to the buffer.
+
+        The oldest element in the buffer is removed as a side effect.
+        """
         self._buffer[self._head] = item
         self._head = self._absidx(1)
 
     def extend(self, items):
+        """Append each element from iterable ``items``."""
         for item in items:
             self.append(item)
 
