@@ -1,3 +1,5 @@
+from numbers import Number
+
 class CircularBuffer(object):
     """Fixed sized pre-initialized circular buffer.
 
@@ -96,7 +98,7 @@ class CircularBuffer(object):
         return self._size
 
     def __getitem__(self, n):
-        if isinstance(n, int):
+        if isinstance(n, Number):
             return self._buffer[self._absidx(n)]
         elif isinstance(n, slice):
             start = 0 if n.start is None else n.start
@@ -107,7 +109,7 @@ class CircularBuffer(object):
             raise TypeError('n must be int or slice')
 
     def __setitem__(self, n, v):
-        if isinstance(n, int):
+        if isinstance(n, Number):
             self._buffer[self._absidx(n)] = v
         elif isinstance(n, slice):
             start = 0 if n.start is None else n.start
