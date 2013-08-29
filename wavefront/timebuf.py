@@ -1,4 +1,3 @@
-from wavefront.circbuf import CircularBuffer
 from math import floor
 from numbers import Number
 
@@ -47,7 +46,7 @@ class TimeBuffer(object):
 
     @property
     def tail_num(self):
-        return self.head_num - self._size
+        return self.head_num - self.size
 
     @property
     def tail_time(self):
@@ -58,7 +57,7 @@ class TimeBuffer(object):
         return self.head_num * self.element_time
 
     def __repr__(self):
-        return "<TimeBuffer %s: size=%s, head=%s>" % (id(self), self._size, self._head)
+        return "<TimeBuffer %s: size=%s, head=%s>" % (id(self), self.size, self.head_num)
 
     def __str__(self):
         return str(dict(self.iteritems()))
@@ -83,6 +82,10 @@ class TimeBuffer(object):
         to the end. If there's a data gap, missing valures are initialized from
         item_factory.
         """
+        try:
+            items = items.iteritems()
+        except Exception:
+            pass
         for k, v in items:
             if self.index(k) >= self.head_num:
                 for n in xrange(self.head_num, self.index(k)):
@@ -116,7 +119,7 @@ class TimeBuffer(object):
         if isinstance(n, Number):
             if n not in self:
                 raise IndexError
-            return self._buffer[self.index(n)] = v
+            self._buffer[self.index(n)] = v
         elif isinstance(n, slice):
             start = self.tail_time if n.start is None else n.start
             start = self.index(start)
