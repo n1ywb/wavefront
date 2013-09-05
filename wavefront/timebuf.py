@@ -25,7 +25,17 @@ class MagicList(list):
         else:
             raise TypeError('n must be int or slice')
 
-class TimeBuffer(object):
+class TimeUtil(object):
+    def index(self, timestamp):
+        return int(timestamp / self.element_time)
+
+    def timestamp(self, index):
+        return float(index) * self.element_time
+
+    def floor(self, timestamp):
+        return self.timestamp(self.index(timestamp))
+
+class TimeBuffer(TimeUtil):
     """Associative circular time series buffer of timestamp/value pairs.
 
     From tail to head timestamps are contiguous and monotonically increasing.
@@ -61,12 +71,6 @@ class TimeBuffer(object):
 
     def __str__(self):
         return str(dict(self.iteritems()))
-
-    def index(self, timestamp):
-        return int(timestamp / self.element_time)
-
-    def timestamp(self, index):
-        return float(index) * self.element_time
 
     def append(self, item):
         """Append exactly one item to the buffer. Item timestamp must be

@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 
+from wavefront.timebuf import TimeUtil
+
 from Queue import Queue
 
 class Bin(object):
-    __slots__ = 'timestamp', 'max', 'min', 'mean', 'nsamples'
-    def __init__(self, timestamp=None, max=None, min=None, mean=None, nsamples=0):
+    def __init__(self, size, timestamp):
+        self.size = size
         self.timestamp = timestamp
-        self.max = max
-        self.min = min
-        self.mean = mean
-        self.nsamples = nsamples
+        self.max = 0
+        self.min = 0
+        self.mean = 0
+        self.nsamples = 0
 
     def __eq__(self, o):
         return (self.timestamp, self.max, self.min, self.mean, self.nsamples ==
@@ -18,69 +20,44 @@ class Bin(object):
     def __ne__(self, o):
         return not (self == o)
 
-class Binner(object):
-    def __init__(self, nsamples, timebuf):
+    def add(self, sample):
+        if self.nsamples >= self.size:
+            sys.stderr.write("Warning: Bin overflow; probable duplicate data\n")
+        ts, val = sample
+        self.max = max(self.max, val)
+        self.min = min(self.min, val)
+        self.mean += val / self.size
+        self.nsamples += 1
+
+
+class Binner(TimeUtil):
+    def __init__(self, binsize, element_time, store):
         """
-        nsamples = 1 / samprate * timebuf.element_time
+        binsize = 1 / samprate * timebuf.element_time
         """
-        self.timebuf = timebuf
-        self.nsamples = nsamples
+        self.binsize = binsize
+        self.element_time = element_time
+        self.store = store
         self.previous = None
 
     def update(self, samples):
-        # How do we signal when a bin should be sent to clients? It could be
-        # full, or it could be partial if we get out of order data
+        """Update bins from samples, return set of updated bins."""
+        updated = set()
         for ts, val in samples:
             # If the bin is full or we have data that falls outside it (if
             # it's full and the data doesn't fall outside it, that's probably
             # duplicate data.)
-
-            # old data may not be buffered, but it may be binned and or
-            # streamed and or cached
-            if ts < self.timebuf.tail_time:
-                continue
-
-            current = self.timebuf.get(ts)
-
+            current = self.store.get(ts)
             if current is None:
-                # new current
-                current = Bin(timestamp=ts, max=val, min=val, mean=val, nsamples=1)
-            else:
-                current.max = max(current.max, val)
-                current.min = min(current.min, val)
-                current.mean = (
-                    (current.mean / nsamples) +
-                        (val / (totsamples - nsamples)))
-                current.nsamples += 1
-
-            if current.nsamples > self.nsamples:
-                sys.stderr.write("Warning: Bin overflow; probable duplicate data\n")
-
-            # Maybe the timebuf could self-publish updates?
-            # I think I already wrote some sort of update publishing dict
-            # Or maybe it makes more sense to emit bin updates and let timebuf
-            # subscribe
-            # what about custom binning and datascope?
-            # maybe best to fully decouple from timebuf. caller should supply a
-            # method for retreiving partial bins (maybe .get?) and update can
-            # just return a list of changed bins
-            self.timebuf.update(((current.timestamp, current),))
-            if self.previous is not current:
-                #self._publish(current)
+                current = Bin(timestamp=self.floor(ts), size=self.binsize)
+            current.add((ts, val))
+            self.store[ts] = current
+            if self.previous is None:
                 self.previous = current
-
-    def subscribe(self):
-        """Returns subscription context"""
-        def context():
-            try:
-                q = Queue()
-                yield q
-            finally:
-                # expunge queue
-                # I think I wrote some code for this in antelope_port_agent?
-                del q
-
-    def _publish(self):
-        """Publish bin to subscribers"""
-        pass
+            if self.previous.timestamp != current.timestamp:
+                updated.add(self.previous)
+            if self.previous.nsamples == self.binsize:
+                updated.add(self.previous)
+            self.previous = current
+        return updated
 
