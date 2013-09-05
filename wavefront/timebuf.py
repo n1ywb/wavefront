@@ -88,6 +88,8 @@ class TimeBuffer(object):
             pass
         for k, v in items:
             if self.index(k) >= self.head_num:
+                if self.index(k) > self.head_num + self.size:
+                    self.head_num = self.index(k) - self.size
                 for n in xrange(self.head_num, self.index(k)):
                     self.append(self.item_factory())
                 self.append(v)
