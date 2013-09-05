@@ -136,6 +136,12 @@ class TimeBuffer(object):
         else:
             raise TypeError('n must be int or slice')
 
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except IndexError:
+            return default
+
     def has_key(self, timestamp):
         """True if timestamp is within the buffer boundaries."""
         return (True if timestamp >= self.tail_time and
