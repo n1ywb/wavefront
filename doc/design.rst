@@ -635,4 +635,42 @@ Feature roadmap
 3. Query data from datascope with simple caching
 4. Performance analysis and advanced caching
 
+    # does anybody want this sample? where do updates go?
+    # how to map updates to listeners
+    # Connection controller will take care of this
+
+    # Important as these questions are, it would be prudent to focus on
+    # our top priority which is weborbrtmon
+    #
+    # 1. App has instances
+    # 2. Instances have orb connections
+    # 2. Orb connections have binners
+    # Really? This isn't like dlmon, the data rate is HIGH. Maybe just have
+    # orbs and sourcenames and allow the user to group them into views?
+
+    # binner 1:1 srcname
+    # in config specify binners explicitly or with regex
+    # on pkt arrival look up binner; on failure match against binner
+    # patterns; if match create binner OTF
+    # dispatch to binner
+
+    # TODO pub/sub here? Each client will need it's own queue for updates...
+    # no; only need to for pub/sub is updates to clients and the session
+    # controller will handle that.
+
+    # simplest if the instance publishes updates; that works for weborbmonrtd;
+    # clients
+
+    # Publish metadata using DataObject class from webdlmon
+    # things clients want to get
+    # list of instances
+    # for an instance
+    #   list of bin sizes
+    #   data: all streaming data for everything
+    #   per-instance metadata
+    #       list of channels
+    #           list of bin sizes
+    # do all channels need to have the same bin-sizes? must be true to have
+    # per-instance bin sizes; otherwise bin sizes are per-channel
+    # arrivals and detections?
 
