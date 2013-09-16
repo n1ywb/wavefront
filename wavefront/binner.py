@@ -64,6 +64,7 @@ class Binner(TimeUtil):
                 self.previous.nsamples < self.binsize:
                 updated.add(self.previous)
             self.previous = current
+        # pass to callback instead?
         return updated
 
 class BinController(object):
