@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-from wavefront.timebuf import TimeUtil
+from collections import defaultdict
+
+from wavefront.timebuf import TimeUtil, TimeBuffer
 
 from Queue import Queue
 
@@ -29,18 +31,24 @@ class Bin(object):
         self.mean += val / self.size
         self.nsamples += 1
 
+    def __repr__(self):
+        return str((self.timestamp, self.max, self.min, self.mean,
+                        self.nsamples))
+
 
 class Binner(TimeUtil):
-    def __init__(self, binsize, element_time, store):
+    def __init__(self, tbin, store):
         """
-        binsize = 1 / samprate * timebuf.element_time
+        binsize = 1 / samprate * timebuf.tbin
         """
-        self.binsize = binsize
-        self.element_time = element_time
+        # won't know this until after we get the first packet
+        # don't need to know it until update
+        self.tbin = tbin
         self.store = store
         self.previous = None
+        self.element_time = tbin
 
-    def update(self, samples):
+    def update(self, root_ts, samples, samprate):
         """Update bins from samples, return set of updated bins."""
         # TODO take sample block instead of ts/sample pairs
         # TODO filter out stale samples
@@ -48,23 +56,23 @@ class Binner(TimeUtil):
         #for ts, val in samples:
         #    if ts >= self.timebuf.tail_time:
         #        updated = self.binner.update(((ts,val),))
-
+        binsize = self.tbin * samprate
         updated = set()
-        for ts, val in samples:
+        for sampnum, val in enumerate(samples):
+            ts = root_ts + 1/samprate * sampnum
             current = self.store.get(ts)
             if current is None:
-                current = Bin(timestamp=self.floor(ts), size=self.binsize)
+                current = Bin(timestamp=self.floor(ts), size=binsize)
             current.add((ts, val))
             self.store.update([(ts, current),])
             if self.previous is None:
                 self.previous = current
-            if current.nsamples == self.binsize:
+            if current.nsamples == binsize:
                 updated.add(current)
-            elif self.previous.timestamp != current.timestamp and
-                self.previous.nsamples < self.binsize:
+            elif (self.previous.timestamp != current.timestamp and
+                  self.previous.nsamples < binsize):
                 updated.add(self.previous)
             self.previous = current
-        # pass to callback instead?
         return updated
 
 class BinController(object):
@@ -84,13 +92,15 @@ class BinController(object):
     # Probably need a different bin controller class for that
 
     def __init__(self):
-        self.binners = {}
+        self.binners = defaultdict(set)
 
-    def add_binner(self, srcname, twin, binsize, samprate):
-        """Add a new bin matching srcname, with size twin and binsize"""
+    def add_binner(self, srcname, twin, tbin):
+        """Add a new bin matching srcname, with size twin and tbin"""
         # is binsize given in samples or seconds?
-        timebuf = TimeBuffer(twin, binsize, ...)
-        self.binners[srcname] = (Binner(timebuf, ...), timebuf, samprate)
+        # print 'add_binner', srcname, twin, tbin
+        timebuf = TimeBuffer(int(twin / tbin), 0, tbin)
+        self.binners[srcname].add(Binner(tbin, timebuf))
+        # print self.binners[srcname]
 
     # TODO
     # def rm_binner
@@ -102,7 +112,7 @@ class BinController(object):
     # Need this to support pre-filling the wf display, not just for unified
     # query API.
 
-    def update(self, srcname, ts, samples):
+    def update(self, srcname, ts, samples, samprate):
         """Given some new data, dispatch it to the appropriate binners.
 
         Return set of updated bins.
@@ -113,8 +123,9 @@ class BinController(object):
         # srcnames
 
         updates = []
+        # print self.binners[srcname]
         for binner in self.binners[srcname]:
-            updates.append(binner, binner.update(ts, samples))
+            # print binner
+            updates.append((binner, binner.update(ts, samples, samprate)))
         return updates
-
 

@@ -13,7 +13,6 @@ release the GIL when entering Antelope C functions. E.g.
 from contextlib import contextmanager
 from cPickle import dumps
 import os
-from weakref import proxy
 
 from gevent import Greenlet
 from gevent.threadpool import ThreadPool, wrap_errors
@@ -22,18 +21,20 @@ from gevent.queue import Queue, Empty, Full
 from antelope.brttpkt import OrbreapThr, Timeout, NoData
 from antelope.Pkt import Packet
 
-from ooi.logging import log
+import logging
 
-import ntp
-
-
-class GilReleaseNotSetError(Exception): pass
+from datetime import datetime
 
 
 if 'ANTELOPE_PYTHON_GILRELEASE' not in os.environ:
     raise GilReleaseNotSetError("ANTELOPE_PYTHON_GILRELEASE not in environment")
 
-MAX_QUEUE_SIZE = 1000
+
+log = logging.getLogger('wavefront.orbpktsrc')
+
+
+class GilReleaseNotSetError(Exception): pass
+
 
 class OrbPktSrc(Greenlet):
     """Gevent based orb packet publisher.
@@ -55,24 +56,27 @@ class OrbPktSrc(Greenlet):
             return dumps(packet)
 
     """
-    def __init__(self, srcname, select=None, reject=None, transformation=None):
+    def __init__(self, orbname, select=None, reject=None, transformation=None,
+                    orbreapthr_queuesize=8, block_on_full=True):
         Greenlet.__init__(self)
-        self.srcname = srcname
+        self.orbname = orbname
         self.select = select
         self.reject = reject
-        self._queues = set()
         self.transformation = transformation
+        self.orbreapthr_queuesize=orbreapthr_queuesize
+        self.block_on_full=block_on_full
+        self._queues = set()
 
     def _run(self):
         try:
-            args = self.srcname, self.select, self.reject
+            args = self.orbname, self.select, self.reject
             # TODO Review this queue size
             # TODO Review reasoning behind using OrbreapThr vs. normal ORB API
             # I think it had something to do with orb.reap() blocking forever
             # on comms failures; maybe we could create our own orbreapthr
             # implementation?
-            with OrbreapThr(*args, timeout=1, queuesize=10000) as orbreapthr:
-                log.info("Connected to ORB %s %s %s" % (self.srcname, self.select,
+            with OrbreapThr(*args, timeout=1, queuesize=orbreapthr_queuesize) as orbreapthr:
+                log.info("Connected to ORB %s %s %s" % (self.orbname, self.select,
                                                         self.reject))
                 threadpool = ThreadPool(maxsize=1)
                 try:
@@ -80,7 +84,7 @@ class OrbPktSrc(Greenlet):
                         try:
                             success, value = threadpool.spawn(
                                     wrap_errors, (Exception,), orbreapthr.get, [], {}).get()
-                            timestamp = ntp.now()
+                            timestamp = datetime.utcnow()
                             if not success:
                                 raise value
                         except (Timeout, NoData), e:
@@ -99,7 +103,7 @@ class OrbPktSrc(Greenlet):
             log.error("OrbPktSrc terminating due to exception", exc_info=True)
             raise
         finally:
-            log.info("Disconnected from ORB %s %s %s" % (self.srcname, self.select,
+            log.info("Disconnected from ORB %s %s %s" % (self.orbname, self.select,
                                                          self.reject))
 
     def _publish(self, r, timestamp):
@@ -109,30 +113,29 @@ class OrbPktSrc(Greenlet):
             packet = self.transformation(packet)
         for queue in self._queues:
             try:
-                queue.put((packet, timestamp), block=False)
+                queue.put((packet, timestamp), block=self.block_on_full)
             except Full:
                 log.debug("queue overflow")
 
     @contextmanager
-    def subscription(self):
+    def subscription(self, queue):
         """This context manager returns a Queue object from which the
         subscriber can get pickled orb packets.
 
-        The returned object is actually a weakref proxy to the real Queue. This
-        ensures that the real Queue is destroyed as soon as the context exits,
-        as nobody but the context manager has the real reference.
+        :param queue: The queue to which you would like packets to be published
+        :type queue: Instance of ``Queue`` or compatible
 
         Example::
 
-            with orbpktsrc.subscription() as queue:
+            queue = Queue()
+            with orbpktsrc.subscription(queue):
                 while True:
                     pickledpacket = queue.get()
                     ...
         """
-        queue = Queue(maxsize=MAX_QUEUE_SIZE)
         self._queues.add(queue)
         try:
-            yield proxy(queue)
+            yield
         finally:
             # Stop publishing
             self._queues.remove(queue)
