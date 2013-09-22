@@ -13,17 +13,17 @@ class Test_Bin(TestCase):
 class Test_Binner(TestCase):
     def setUp(self):
         self.store = dict()
-        self.tb = TimeBuffer(size=4, head_time=1, element_time=element_time)
-        self.binner = Binner(3, element_time, self.store)
+        #self.tb = TimeBuffer(size=4, head_time=1, element_time=element_time)
+        self.binner = Binner(1, self.store)
 
     def test_update_1(self):
-        self.assertEquals(self.binner.update(tuple()), set())
-        updated = self.binner.update(((0, 0),))
+        self.assertEquals(self.binner.update(0, tuple(), 4), set())
+        updated = self.binner.update(0, [0], 4)
         self.assertEquals(updated, set())
-        updated = self.binner.update(((-1, 0),))
+        updated = self.binner.update(-1, [0], 4)
         self.assertEquals(updated.pop().timestamp, 0)
-        updated = self.binner.update(((1, 0),))
+        updated = self.binner.update(1, [0], 4)
         self.assertEquals(updated.pop().timestamp, -1)
 
     def test_update_2(self):
-        self.binner.update(((0, 0), (0.25, 1), (0.5, 0)))
+        self.binner.update(0, [0, 1, 0], 4)
