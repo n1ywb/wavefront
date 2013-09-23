@@ -47,8 +47,9 @@ class Orb(Greenlet):
     That seems logical to have here.
     """
 
-    def __init__(self, orbname, select=None, reject=None):
+    def __init__(self, orbname, callback, select=None, reject=None):
         super(Orb, self).__init__()
+        self.callback = callback
         self.binners = BinController()
         self.orbname = orbname
         self.select = select
@@ -67,9 +68,10 @@ class Orb(Greenlet):
             updated = self.binners.update(srcname, channel.time,
                                           channel.data, channel.samprate)
             # print updated
-            for binner, updated in updated:
+            #for binner, updates in updated:
+            for update in updated:
                 # emit updates
-                pass
+                self.callback(update)
 
     def _run(self):
         """Main loop; reap and process pkts"""
