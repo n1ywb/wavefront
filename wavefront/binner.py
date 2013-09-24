@@ -41,6 +41,14 @@ class Bin(object):
         return str((self.timestamp, self.max, self.min, self.mean,
                         self.nsamples))
 
+    def asdict(self):
+        return dict(
+            timestamp=self.timestamp,
+            max=self.max,
+            min=self.min,
+            mean=self.mean,
+            nsamples=self.nsamples)
+
 
 class Binner(TimeUtil):
     def __init__(self, tbin, store):
