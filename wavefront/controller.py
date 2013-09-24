@@ -47,24 +47,30 @@ class Orb(Greenlet):
     That seems logical to have here.
     """
 
-    def __init__(self, orbname, callback, select=None, reject=None):
+    def __init__(self, orbname, callback, select=None, reject=None, tafter=None):
         super(Orb, self).__init__()
         self.callback = callback
         self.binners = BinController()
         self.orbname = orbname
         self.select = select
         self.reject = reject
+        self.tafter = tafter
 
     def add_binner(self, srcname, twin, tbin):
         self.binners.add_binner(srcname, twin, tbin)
 
     def _process(self, value, timestamp):
         pktid, srcname, orbtimestamp, raw_packet = value
+        log.info("Processing packet %s %s %s" % (pktid, srcname, orbtimestamp))
         packet = Packet(srcname, orbtimestamp, raw_packet)
 
         for channel in packet.channels:
             # print channel
-            srcname = '_'.join((channel.net, channel.sta, channel.chan, channel.loc))
+            parts = [channel.net, channel.sta, channel.chan]
+            if channel.loc is not '':
+                    parts.append(channel.loc)
+            srcname = '_'.join(parts)
+            log.info("srcname %s" % (srcname))
             updated = self.binners.update(srcname, channel.time,
                                           channel.data, channel.samprate)
             # print updated
@@ -77,7 +83,7 @@ class Orb(Greenlet):
         """Main loop; reap and process pkts"""
         try:
             args = self.orbname, self.select, self.reject
-            with OrbreapThr(*args, timeout=1, queuesize=8) as orbreapthr:
+            with OrbreapThr(*args, timeout=1, queuesize=8, after=self.tafter) as orbreapthr:
                 log.info("Connected to ORB %s %s %s" % (self.orbname, self.select,
                                                         self.reject))
                 threadpool = ThreadPool(maxsize=1)

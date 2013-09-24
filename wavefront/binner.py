@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 
+import sys
+
 from wavefront.timebuf import TimeUtil, TimeBuffer
 
 from Queue import Queue
@@ -10,8 +12,8 @@ class Bin(object):
     def __init__(self, size, timestamp):
         self.size = size
         self.timestamp = timestamp
-        self.max = 0
-        self.min = 0
+        self.max = None
+        self.min = None
         self.mean = 0
         self.nsamples = 0
 
@@ -26,8 +28,12 @@ class Bin(object):
         if self.nsamples >= self.size:
             sys.stderr.write("Warning: Bin overflow; probable duplicate data\n")
         ts, val = sample
-        self.max = max(self.max, val)
-        self.min = min(self.min, val)
+        if self.max is None:
+            self.max = val
+            self.min = val
+        else:
+            self.max = max(self.max, val)
+            self.min = min(self.min, val)
         self.mean += val / self.size
         self.nsamples += 1
 
