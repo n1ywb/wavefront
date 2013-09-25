@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 from collections import defaultdict
+from contextlib import contextmanager
+
 
 import sys
 
@@ -51,16 +53,19 @@ class Bin(object):
 
 
 class Binner(TimeUtil):
-    def __init__(self, tbin, store):
+    def __init__(self, srcname, twin, tbin, store):
         """
         binsize = 1 / samprate * timebuf.tbin
         """
         # won't know this until after we get the first packet
         # don't need to know it until update
+        self.srcname = srcname
+        self.twin = twin
         self.tbin = tbin
         self.store = store
         self.previous = None
         self.element_time = tbin
+        self._queues = set()
 
     def update(self, root_ts, samples, samprate):
         """Update bins from samples, return set of updated bins."""
@@ -71,7 +76,7 @@ class Binner(TimeUtil):
         #    if ts >= self.timebuf.tail_time:
         #        updated = self.binner.update(((ts,val),))
         binsize = self.tbin * samprate
-        updated = set()
+        updated = []
         for sampnum, val in enumerate(samples):
             ts = root_ts + 1/samprate * sampnum
             current = self.store.get(ts)
@@ -82,12 +87,43 @@ class Binner(TimeUtil):
             if self.previous is None:
                 self.previous = current
             if current.nsamples == binsize:
-                updated.add(current)
+                updated.append(current)
             elif (self.previous.timestamp != current.timestamp and
                   self.previous.nsamples < binsize):
-                updated.add(self.previous)
+                updated.append(self.previous)
             self.previous = current
-        return updated
+        self._publish(updated)
+
+    def _publish(self, obj):
+        for queue in self._queues:
+            try:
+                queue.put(obj, block=False)
+            except Full:
+                log.warning("queue overflow")
+                # todo disconnect slow client
+
+    @contextmanager
+    def subscription(self, queue):
+        """Subscribe queue
+
+        :param queue: The queue to which you would like packets to be published
+        :type queue: Instance of ``Queue`` or compatible
+
+        Example::
+
+            queue = Queue()
+            with publisher.subscription(queue):
+                while True:
+                    pickledpacket = queue.get()
+                    ...
+        """
+        self._queues.add(queue)
+        try:
+            yield
+        finally:
+            # Stop publishing
+            self._queues.remove(queue)
+
 
 class BinController(object):
     """Receives packets from exactly one ORB, dispatches them to binners,
@@ -113,8 +149,14 @@ class BinController(object):
         # is binsize given in samples or seconds?
         # print 'add_binner', srcname, twin, tbin
         timebuf = TimeBuffer(int(twin / tbin), 0, tbin)
-        self.binners[srcname].add(Binner(tbin, timebuf))
+        self.binners[srcname].add(Binner(srcname, twin, tbin, timebuf))
         # print self.binners[srcname]
+
+    def get_binner(self, srcname, twin, tbin):
+        for binner in self.binners[srcname]:
+            if (binner.twin, binner.tbin) == (twin, tbin):
+                return binner
+        return None
 
     # TODO
     # def rm_binner
@@ -136,10 +178,6 @@ class BinController(object):
         # todo: support dynamically creating new binners based on regex
         # srcnames
 
-        updates = []
-        # print self.binners[srcname]
         for binner in self.binners[srcname]:
-            # print binner
-            updates.append((binner, binner.update(ts, samples, samprate)))
-        return updates
+            binner.update(ts, samples, samprate)
 
