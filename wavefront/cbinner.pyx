@@ -1,10 +1,12 @@
 # cython: profile=True
 
+import cython
+
 from contextlib import contextmanager
 
 import sys
 
-from wavefront.ctimebuf import TimeUtil
+from wavefront.ctimebuf cimport TimeUtil
 
 
 from Queue import Queue, Full
@@ -13,7 +15,7 @@ import logging
 log = logging.getLogger(__name__)
 
 
-cdef class Bin(object):
+cdef class Bin:
     cdef public int size
     cdef public double timestamp
     cdef public double max
@@ -21,7 +23,7 @@ cdef class Bin(object):
     cdef public double mean 
     cdef public int nsamples
 
-    def __init__(self, size, timestamp):
+    def __cinit__(self, int size, double timestamp):
         self.size = size
         self.timestamp = timestamp
         self.mean = 0
@@ -34,10 +36,9 @@ cdef class Bin(object):
 #    cpdef __ne__(self, o):
 #        return not (self == o)
 #
-    cpdef add(self, sample):
+    cpdef add(self, double ts, val):
         if self.nsamples >= self.size:
             sys.stderr.write("Warning: Bin overflow; probable duplicate data\n")
-        ts, val = sample
         if self.nsamples == 0:
             self.max = val
             self.min = val
@@ -76,33 +77,45 @@ class Binner(TimeUtil):
         self._queues = set()
 
     def update(self, double root_ts, samples, double samprate):
+        """Update bins from samples, return set of updated bins."""
         cdef int sampnum
         cdef double ts
         cdef Bin current
-        """Update bins from samples, return set of updated bins."""
+        cdef Bin previous
+        cdef object val
+        cdef object store
+        cdef int binsize
+        cdef double floored
+
+        assert samprate != 0.0
+        store = self.store
         # TODO take sample block instead of ts/sample pairs
         # TODO filter out stale samples
         # Something like this (but maybe more efficient)
         #for ts, val in samples:
         #    if ts >= self.timebuf.tail_time:
         #        updated = self.binner.update(((ts,val),))
-        binsize = self.tbin * samprate
+        binsize = int(self.tbin * samprate)
         updated = []
         for sampnum in xrange(len(samples)):
             val = samples[sampnum]
-            ts = root_ts + 1.0/samprate * sampnum
-            current = self.store.get(ts)
+            with cython.cdivision(True):
+                ts = root_ts + 1.0/samprate * sampnum
+            current = store.get(ts)
             if current is None:
-                current = Bin(timestamp=self.floor(ts), size=binsize)
-            current.add((ts, val))
-            self.store.update(ts, current)
-            if self.previous is None:
+                floored = (<TimeUtil>self).floor(ts)
+                current = Bin.__new__(Bin, floored, binsize)
+            current.add(ts, val)
+            store.update(ts, current)
+            previous = self.previous
+            if previous is None:
                 self.previous = current
+                previous = self.previous
             if current.nsamples == binsize:
                 updated.append(current)
-            elif (self.previous.timestamp != current.timestamp and
-                  self.previous.nsamples < binsize):
-                updated.append(self.previous)
+            elif (previous.timestamp != current.timestamp and
+                  previous.nsamples < binsize):
+                updated.append(previous)
             self.previous = current
         self._publish(updated)
 

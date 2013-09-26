@@ -2,7 +2,6 @@
 
 
 
-from math import floor
 from numbers import Number
 
 class MagicList(list):
@@ -12,14 +11,14 @@ class MagicList(list):
     def __setitem__(self, n, v):
         super(MagicList, self).__setitem__(n % len(self), v)
 
-class TimeUtil:
-    def index(self, timestamp):
+cdef class TimeUtil:
+    cpdef int index(self, double timestamp):
         return int(timestamp / self.element_time)
 
-    def timestamp(self, index):
+    cpdef double timestamp(self, int index):
         return float(index) * self.element_time
 
-    def floor(self, timestamp):
+    cpdef double floor(self, double timestamp):
         return self.timestamp(self.index(timestamp))
 
 class TimeBuffer(TimeUtil):
