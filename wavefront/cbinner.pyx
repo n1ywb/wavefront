@@ -32,13 +32,15 @@ cdef class Bin:
 #    cpdef __eq__(self, o):
 #        return (self.timestamp, self.max, self.min, self.mean, self.nsamples ==
 #                o.timestamp, o.max, o.min, o.mean, o.nsamples)
-#
+
 #    cpdef __ne__(self, o):
 #        return not (self == o)
-#
+
     cpdef add(self, double ts, val):
-        if self.nsamples >= self.size:
-            sys.stderr.write("Warning: Bin overflow; probable duplicate data\n")
+        # not >= b/c sometimes nsamples == size + 1 due to aliasing
+        if self.nsamples > self.size:
+            sys.stderr.write("Warning: Bin overflow; duplicate data? %s %s\n" %
+                                    (self.nsamples, self.size))
         if self.nsamples == 0:
             self.max = val
             self.min = val
@@ -75,6 +77,7 @@ class Binner(TimeUtil):
         self.previous = None
         self.element_time = tbin
         self._queues = set()
+        assert self.element_time != 0.0
 
     def update(self, double root_ts, samples, double samprate):
         """Update bins from samples, return set of updated bins."""
@@ -109,15 +112,15 @@ class Binner(TimeUtil):
             store.update(ts, current)
             previous = self.previous
             if previous is None:
-                self.previous = current
-                previous = self.previous
+                previous = self.previous = current
             if current.nsamples == binsize:
                 updated.append(current)
             elif (previous.timestamp != current.timestamp and
                   previous.nsamples < binsize):
                 updated.append(previous)
             self.previous = current
-        self._publish(updated)
+        if len(updated) > 0:
+            self._publish(updated)
 
     def _publish(self, obj):
         for queue in self._queues:
