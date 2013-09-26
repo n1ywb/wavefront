@@ -28,8 +28,8 @@ import logging
 
 from datetime import datetime
 
-from wavefront.binner import Binner, Bin
-from wavefront.timebuf import TimeBuffer
+from wavefront.cbinner import Binner, Bin
+from wavefront.ctimebuf import TimeBuffer
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class Orb(Greenlet):
 
     def _process(self, value, timestamp):
         pktid, srcname, orbtimestamp, raw_packet = value
-        log.info("Processing packet %s %s %s" % (pktid, srcname, orbtimestamp))
+        log.debug("Processing packet %s %s %s" % (pktid, srcname, orbtimestamp))
         packet = Packet(srcname, orbtimestamp, raw_packet)
 
         for channel in packet.channels:
@@ -129,7 +129,7 @@ class Orb(Greenlet):
             if channel.loc is not '':
                     parts.append(channel.loc)
             srcname = '_'.join(parts)
-            log.info("srcname %s" % (srcname))
+            log.debug("srcname %s" % (srcname))
             self.binners.update(srcname, channel.time,
                                           channel.data, channel.samprate)
 
@@ -150,7 +150,7 @@ class Orb(Greenlet):
                             if not success:
                                 raise value
                         except (Timeout, NoData), e:
-                            log.debug("orbreapthr.get exception %r" % type(e))
+                            log.warning("orbreapthr.get exception %r" % type(e))
                             pass
                         else:
                             if value is None:

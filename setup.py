@@ -2,7 +2,13 @@
 
 from setuptools import setup, find_packages
 
+from Cython.Build import cythonize
+
+from distutils.extension import Extension
+from Cython.Distutils import build_ext
+
 setup(
+    cmdclass = {'build_ext': build_ext},
     name = "wavefront",
     version = "0.1",
     packages = find_packages(),
@@ -14,6 +20,10 @@ setup(
 
     package_data = {
     },
+
+    ext_modules =
+        cythonize('wavefront/*.pyx')
+    , # accepts a glob pattern
 
     # metadata for upload to PyPI
     author = "UCSD Array Network Facility",
