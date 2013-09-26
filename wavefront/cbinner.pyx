@@ -23,7 +23,7 @@ cdef class Bin:
     cdef public double mean 
     cdef public int nsamples
 
-    def __cinit__(self, int size, double timestamp):
+    def __cinit__(self, double timestamp, int size):
         self.size = size
         self.timestamp = timestamp
         self.mean = 0
@@ -85,7 +85,7 @@ class Binner(TimeUtil):
         cdef object val
         cdef object store
         cdef int binsize
-        cdef double floored
+        cdef int floored
 
         assert samprate != 0.0
         store = self.store
@@ -100,10 +100,10 @@ class Binner(TimeUtil):
         for sampnum in xrange(len(samples)):
             val = samples[sampnum]
             with cython.cdivision(True):
-                ts = root_ts + 1.0/samprate * sampnum
+                ts = root_ts + 1.0 / samprate * sampnum
             current = store.get(ts)
             if current is None:
-                floored = (<TimeUtil>self).floor(ts)
+                floored = int((<TimeUtil>self).floor(ts))
                 current = Bin.__new__(Bin, floored, binsize)
             current.add(ts, val)
             store.update(ts, current)
