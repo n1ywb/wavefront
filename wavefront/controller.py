@@ -18,6 +18,8 @@ if 'ANTELOPE_PYTHON_GILRELEASE' not in os.environ:
     raise GilReleaseNotSetError("ANTELOPE_PYTHON_GILRELEASE not in environment")
 
 
+import atexit
+
 from gevent import Greenlet, sleep
 from gevent.threadpool import ThreadPool, wrap_errors
 
@@ -92,6 +94,17 @@ class BinController(object):
         for binner in self.binners[srcname]:
             binner.update(ts, samples, samprate)
 
+now = datetime.utcnow()
+
+npkts = 0
+def _():
+    then = datetime.utcnow()
+    d = then - now
+    print "Processed %s pkts in %s seconds at %s/sec" % (npkts,
+    d.total_seconds() - 10,
+                                            float(npkts) / (d.total_seconds() -
+                                            10))
+atexit.register(_)
 
 class Orb(Greenlet):
     """
@@ -119,6 +132,8 @@ class Orb(Greenlet):
         self.binners.add_binner(srcname, twin, tbin)
 
     def _process(self, value, timestamp):
+        global npkts
+        npkts += 1
         pktid, srcname, orbtimestamp, raw_packet = value
         log.debug("Processing packet %s %s %s" % (pktid, srcname, orbtimestamp))
         packet = Packet(srcname, orbtimestamp, raw_packet)
@@ -150,7 +165,7 @@ class Orb(Greenlet):
                             if not success:
                                 raise value
                         except (Timeout, NoData), e:
-                            log.warning("orbreapthr.get exception %r" % type(e))
+                            log.debug("orbreapthr.get exception %r" % type(e))
                             pass
                         else:
                             if value is None:
