@@ -28,9 +28,69 @@ import logging
 
 from datetime import datetime
 
-from wavefront.binner import BinController
+from wavefront.binner import Binner, Bin
+from wavefront.timebuf import TimeBuffer
 
-log = logging.getLogger('wavefront.orbpktsrc')
+log = logging.getLogger(__name__)
+
+from collections import defaultdict
+
+
+class BinController(object):
+    """Receives packets from exactly one ORB, dispatches them to binners,
+    returns updated bins
+
+    you could probably use it for multiple orbs if you can guarantee that each
+    orb has a unique set of source names; i.e. the same srcname does not appear
+    on both orbs.
+
+    how to configure binners?
+    """
+
+    # what kind of store for the binners that's aren't preconfigured
+    # for streaming?
+    # I guess it will be memcache based.
+    # Probably need a different bin controller class for that
+
+    def __init__(self):
+        self.binners = defaultdict(set)
+
+    def add_binner(self, srcname, twin, tbin):
+        """Add a new bin matching srcname, with size twin and tbin"""
+        # is binsize given in samples or seconds?
+        # print 'add_binner', srcname, twin, tbin
+        timebuf = TimeBuffer(int(twin / tbin), 0, tbin)
+        self.binners[srcname].add(Binner(srcname, twin, tbin, timebuf))
+        # print self.binners[srcname]
+
+    def get_binner(self, srcname, twin, tbin):
+        for binner in self.binners[srcname]:
+            if (binner.twin, binner.tbin) == (twin, tbin):
+                return binner
+        return None
+
+    # TODO
+    # def rm_binner
+    # must be possible to remove stale ones later when we do regex matching
+
+    # TODO
+    # def query(self, srcname, binsize, tstart, tend):
+    #    timebuf = self.binners[srcname].timebuf
+    # Need this to support pre-filling the wf display, not just for unified
+    # query API.
+
+    def update(self, srcname, ts, samples, samprate):
+        """Given some new data, dispatch it to the appropriate binners.
+
+        Return set of updated bins.
+        """
+
+        # send to all binners; let binners filter out any stale data
+        # todo: support dynamically creating new binners based on regex
+        # srcnames
+
+        for binner in self.binners[srcname]:
+            binner.update(ts, samples, samprate)
 
 
 class Orb(Greenlet):
