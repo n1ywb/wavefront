@@ -36,7 +36,7 @@ cdef class Bin:
 #    cpdef __ne__(self, o):
 #        return not (self == o)
 
-    cpdef add(self, double ts, val):
+    cpdef add(self, double ts, double val):
         # not >= b/c sometimes nsamples == size + 1 due to aliasing
         if self.nsamples > self.size:
             sys.stderr.write("Warning: Bin overflow; duplicate data? %s %s\n" %
@@ -47,7 +47,8 @@ cdef class Bin:
         else:
             self.max = max(self.max, val)
             self.min = min(self.min, val)
-        self.mean += val / self.size
+        with cython.cdivision(True):
+            self.mean += val / self.size
         self.nsamples += 1
 
     def __repr__(self):
@@ -85,10 +86,11 @@ class Binner(TimeUtil):
         cdef double ts
         cdef Bin current
         cdef Bin previous
-        cdef object val
+        cdef double val
         cdef object store
         cdef int binsize
-        cdef int floored
+        cdef double floored
+        cdef double period
 
         assert samprate != 0.0
         store = self.store
@@ -98,18 +100,25 @@ class Binner(TimeUtil):
         #for ts, val in samples:
         #    if ts >= self.timebuf.tail_time:
         #        updated = self.binner.update(((ts,val),))
-        binsize = int(self.tbin * samprate)
+        binsize = self.tbin * samprate
+        with cython.cdivision(True):
+            period = 1.0 / samprate
         updated = []
+        current = store.get(root_ts)
         for sampnum in xrange(len(samples)):
             val = samples[sampnum]
-            with cython.cdivision(True):
-                ts = root_ts + 1.0 / samprate * sampnum
-            current = store.get(ts)
+            ts = root_ts + period * sampnum
+            floored_ts = (<TimeUtil>self).floor(ts)
+
+            # Make this better
+            if current is not None and current.timestamp != floored_ts:
+                current = store.get(ts)
             if current is None:
-                floored = int((<TimeUtil>self).floor(ts))
-                current = Bin.__new__(Bin, floored, binsize)
+                current = Bin.__new__(Bin, floored_ts, binsize)
+                store.update(ts, current)
+
             current.add(ts, val)
-            store.update(ts, current)
+
             previous = self.previous
             if previous is None:
                 previous = self.previous = current
@@ -119,6 +128,7 @@ class Binner(TimeUtil):
                   previous.nsamples < binsize):
                 updated.append(previous)
             self.previous = current
+
         if len(updated) > 0:
             self._publish(updated)
 

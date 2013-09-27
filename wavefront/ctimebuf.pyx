@@ -32,13 +32,15 @@ cdef class TimeUtil:
 
     @cython.cdivision(True)
     cpdef int index(self, double timestamp):
-        return int(timestamp / self.element_time)
+        return <int>(timestamp / self.element_time)
 
     cpdef double timestamp(self, int index):
-        return float(index) * self.element_time
+        return index * self.element_time
 
+    @cython.cdivision(True)
     cpdef double floor(self, double timestamp):
-        return self.timestamp(self.index(timestamp))
+        return <int>(timestamp / self.element_time) * self.element_time
+
 
 cdef class TimeBuffer(TimeUtil):
     """Associative circular time series buffer of timestamp/value pairs.
