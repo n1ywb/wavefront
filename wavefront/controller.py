@@ -20,7 +20,7 @@ if 'ANTELOPE_PYTHON_GILRELEASE' not in os.environ:
 
 import atexit
 
-from gevent import Greenlet, sleep
+from gevent import Greenlet, sleep, spawn
 from gevent.threadpool import ThreadPool, wrap_errors
 
 from antelope.brttpkt import OrbreapThr, Timeout, NoData
@@ -94,17 +94,6 @@ class BinController(object):
         for binner in self.binners[srcname]:
             binner.update(ts, samples, samprate)
 
-now = datetime.utcnow()
-
-npkts = 0
-def _():
-    then = datetime.utcnow()
-    d = then - now
-    print "Processed %s pkts in %s seconds at %s/sec" % (npkts,
-    d.total_seconds() - 10,
-                                            float(npkts) / (d.total_seconds() -
-                                            10))
-atexit.register(_)
 
 class Orb(Greenlet):
     """
@@ -127,14 +116,24 @@ class Orb(Greenlet):
         self.select = select
         self.reject = reject
         self.tafter = tafter
+        self.npkts = 0
+        self.last_pktid = None
+        self.last_orbtime = None
+        self.timeon = None
+        self.timeoff = None
+
+    def _janitor(self, src):
+        log.debug("Janitor, cleanup aisle 12")
+        self.kill(src.exception)
 
     def add_binner(self, srcname, twin, tbin):
         self.binners.add_binner(srcname, twin, tbin)
 
     def _process(self, value, timestamp):
-        global npkts
-        npkts += 1
+        self.npkts += 1
         pktid, srcname, orbtimestamp, raw_packet = value
+        self.last_pktid = pktid
+        self.last_orbtime = orbtimestamp
         log.debug("Processing packet %s %s %s" % (pktid, srcname, orbtimestamp))
         packet = Packet(srcname, orbtimestamp, raw_packet)
 
@@ -148,13 +147,32 @@ class Orb(Greenlet):
             self.binners.update(srcname, channel.time,
                                           channel.data, channel.samprate)
 
+    def _status_printer(self):
+        try:
+            while True:
+                now = datetime.utcnow()
+                log.info("%s pkts in %s at %s pkts/s" % (
+                        self.npkts,
+                        now - self.timeon,
+                        float(self.npkts) / ((now - self.timeon).total_seconds())
+                ))
+                log.info("on pktid %s orbtime %s" % (self.last_pktid,
+                                                        self.last_orbtime))
+                sleep(5)
+        except Exception:
+            log.error("_status_printer failure", exc_info=True)
+
     def _run(self):
         """Main loop; reap and process pkts"""
         try:
             args = self.orbname, self.select, self.reject
+            print repr(self.orbname)
+            print repr(args)
             with OrbreapThr(*args, timeout=1, queuesize=8, after=self.tafter) as orbreapthr:
                 log.info("Connected to ORB %s %s %s" % (self.orbname, self.select,
                                                         self.reject))
+                self.timeoff = self.timeon = datetime.utcnow()
+                spawn(self._status_printer).link_exception(self._janitor)
                 threadpool = ThreadPool(maxsize=1)
                 try:
                     while True:
@@ -180,8 +198,21 @@ class Orb(Greenlet):
             log.error("OrbPktSrc terminating due to exception", exc_info=True)
             raise
         finally:
+            self.timeoff = datetime.utcnow()
             log.info("Disconnected from ORB %s %s %s" % (self.orbname, self.select,
                                                          self.reject))
+            try:
+                log.info("%s pkts in %s at %s pkts/s" % (
+                    self.npkts,
+                    self.timeoff - self.timeon,
+                    float(self.npkts) / ((self.timeoff - self.timeon).total_seconds() - 10)
+                ))
+            except:
+                log.warning("Error printing stats")
+
+    def _get_stats(self):
+        return (
+            )
 
 
 class App(Greenlet):
