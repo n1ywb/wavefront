@@ -146,6 +146,7 @@ class Orb(Greenlet):
             log.debug("srcname %s" % (srcname))
             self.binners.update(srcname, channel.time,
                                           channel.data, channel.samprate)
+        sleep(0)
 
     def _status_printer(self):
         try:
